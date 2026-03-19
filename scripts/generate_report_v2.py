@@ -14,8 +14,8 @@ from datetime import datetime
 
 # ============== 配置 ==============
 CLIENT_DATA_DIR = r"C:\Users\mingh\client-data"
-RAW_DATA_DIR = r"C:\Users\mingh\client-data\raw\客户档案\诺斯贝尔\运维工单"
-MODULE_DATA_FILE = os.path.join(CLIENT_DATA_DIR, "诺斯贝尔_2025_模块工单数据.txt")
+RAW_DATA_DIR = r"C:\Users\mingh\client-data\raw\客户档案\明阳电路\运维工单"
+MODULE_DATA_FILE = os.path.join(CLIENT_DATA_DIR, "明阳电路_2025_模块工单数据.txt")
 OUTPUT_DIR = CLIENT_DATA_DIR
 
 # API配置
@@ -283,13 +283,13 @@ def generate_report():
     print("  [OK]")
     
     # 整合报告
-    report = f"""# 诺斯贝尔2025年度SRM运维分析报告
+    report = f"""# 明阳电路2025年度SRM运维分析报告
 
 ## 报告信息
 | 项目 | 内容 |
 |------|------|
 | 报告周期 | 2025年度 |
-| 客户名称 | 诺斯贝尔 |
+| 客户名称 | 明阳电路 |
 | 报告生成时间 | {datetime.now().strftime('%Y-%m-%d')} |
 | 服务团队 | 甄云科技 |
 
@@ -342,8 +342,8 @@ def generate_report():
 """
     
     # 保存报告
-    version = 28
-    output_file = os.path.join(OUTPUT_DIR, f"诺斯贝尔_2025_运维报告_V{version}.md")
+    version = 1
+    output_file = os.path.join(OUTPUT_DIR, f"明阳电路_2025_运维报告_V{version}.md")
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(report)
     

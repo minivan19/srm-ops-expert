@@ -14,8 +14,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import glob
 CLIENT_DATA_DIR = r"C:\Users\mingh\client-data"
 
-# 查找最新的运维报告MD文件 - 按版本号排序
-md_files = glob.glob(os.path.join(CLIENT_DATA_DIR, "诺斯贝尔_2025_运维报告_*.md"))
+# 查找明阳电路运维报告MD文件
+import glob
+CLIENT_DATA_DIR = r"C:\Users\mingh\client-data"
+md_files = glob.glob(os.path.join(CLIENT_DATA_DIR, "明阳电路_2025_运维报告_*.md"))
 import re
 def extract_version(f):
     match = re.search(r'V(\d+)', f)
@@ -26,8 +28,8 @@ if md_files:
     MD_FILE = latest_md
     DOC_FILE = latest_md.replace('.md', '.docx')
 else:
-    MD_FILE = os.path.join(CLIENT_DATA_DIR, "诺斯贝尔_2025_运维报告.md")
-    DOC_FILE = os.path.join(CLIENT_DATA_DIR, "诺斯贝尔_2025_运维报告.docx")
+    MD_FILE = os.path.join(CLIENT_DATA_DIR, "明阳电路_2025_运维报告.md")
+    DOC_FILE = os.path.join(CLIENT_DATA_DIR, "明阳电路_2025_运维报告.docx")
 
 
 def read_md(file_path):

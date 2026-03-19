@@ -9,7 +9,7 @@ import pandas as pd
 import glob
 import os
 
-EXCEL_DIR = r"C:\Users\mingh\client-data\raw\客户档案\诺斯贝尔\运维工单"
+EXCEL_DIR = r"C:\Users\mingh\client-data\raw\客户档案\明阳电路\运维工单"
 OUTPUT_DIR = r"C:\Users\mingh\client-data"
 
 
@@ -91,7 +91,7 @@ def main():
         print(f"\n{mod} 提取完成: {len(records)}条")
     
     # 保存到文件
-    output_file = os.path.join(OUTPUT_DIR, "诺斯贝尔_2025_模块工单数据.txt")
+    output_file = os.path.join(OUTPUT_DIR, "明阳电路_2025_模块工单数据.txt")
     with open(output_file, 'w', encoding='utf-8') as f:
         for mod, records in all_data.items():
             f.write(format_for_llm(mod, records))
