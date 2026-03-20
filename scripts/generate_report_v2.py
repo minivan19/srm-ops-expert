@@ -3,6 +3,8 @@
 """
 SRM运维报告生成脚本
 自动调用LLM生成完整报告
+用法：
+  python scripts/generate_report_v2.py 客户名
 """
 
 import os
@@ -10,13 +12,14 @@ import sys
 import glob
 import requests
 import pandas as pd
+import time
+import argparse
 from datetime import datetime
 
 # ============== 配置 ==============
-CLIENT_DATA_DIR = r"C:\Users\mingh\client-data"
-RAW_DATA_DIR = r"C:\Users\mingh\client-data\raw\客户档案\明阳电路\运维工单"
-MODULE_DATA_FILE = os.path.join(CLIENT_DATA_DIR, "明阳电路_2025_模块工单数据.txt")
-OUTPUT_DIR = CLIENT_DATA_DIR
+RAW_DATA_ROOT = "/Users/limingheng/AI/client-data/raw/客户档案"
+CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data"
+WORKSPACE_MEDIA_DIR = "/Users/limingheng/.openclaw/workspace/media"
 
 # API配置
 API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-340ed7819c2346508c0a46a80df85999")
@@ -25,9 +28,31 @@ API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-340ed7819c2346508c0a46a80df8599
 MODEL = "deepseek-chat"
 TEMPERATURE = 0.3
 
+# 全局路径（由 build_paths 填充）
+RAW_DATA_DIR = None
+MODULE_DATA_FILE = None
+OUTPUT_DIR = None
+CLIENT_NAME = None
+REPORT_YEAR = None
 
-def call_llm(prompt, temperature=TEMPERATURE):
-    """调用DeepSeek LLM"""
+
+def build_paths(client_name, year):
+    """根据客户名构建路径"""
+    global RAW_DATA_DIR, MODULE_DATA_FILE, OUTPUT_DIR, CLIENT_NAME, REPORT_YEAR
+    CLIENT_NAME = client_name
+    REPORT_YEAR = year
+    raw_dir = os.path.join(RAW_DATA_ROOT, client_name, "运维工单")
+    out_dir = os.path.join(CLIENT_DATA_DIR, client_name)
+    os.makedirs(out_dir, exist_ok=True)
+    module_file = os.path.join(out_dir, f"{client_name}_{year}_模块工单数据.txt")
+    RAW_DATA_DIR = raw_dir
+    MODULE_DATA_FILE = module_file
+    OUTPUT_DIR = out_dir
+
+
+def call_llm(prompt, temperature=TEMPERATURE, max_retries=5, retry_delay=5.0,
+              max_tokens=800):
+    """调用DeepSeek LLM（带重试机制，非streaming模式）"""
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
@@ -35,15 +60,35 @@ def call_llm(prompt, temperature=TEMPERATURE):
     data = {
         "model": MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature
+        "temperature": temperature,
+        "max_tokens": max_tokens
     }
-    response = requests.post(
-        "https://api.deepseek.com/v1/chat/completions",
-        headers=headers,
-        json=data,
-        timeout=180
-    )
-    return response.json()["choices"][0]["message"]["content"]
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            # 使用 stream=False，读取完整响应后再解析
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers=headers,
+                json=data,
+                timeout=(30, 240),
+                stream=False
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if "choices" in result and len(result["choices"]) > 0:
+                    return result["choices"][0]["message"]["content"]
+                else:
+                    last_error = f"无效响应格式: {result}"
+            else:
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+        except Exception as e:
+            last_error = str(e)
+        if attempt < max_retries:
+            print(f"    [LLM重试 {attempt}/{max_retries}，{retry_delay:.0f}s后...]")
+            time.sleep(retry_delay)
+            retry_delay *= 2
+    raise RuntimeError(f"LLM调用失败（已重试{max_retries}次）: {last_error}")
 
 
 def load_module_data():
@@ -58,12 +103,13 @@ def load_module_data():
 
 
 def load_raw_data():
-    """读取原始Excel数据用于统计"""
+    """读取原始Excel数据用于统计（仅指定年份）"""
     files = glob.glob(os.path.join(RAW_DATA_DIR, "*.xlsx"))
+    files = [f for f in files if str(REPORT_YEAR) in os.path.basename(f)]
     if not files:
-        print(f"错误: 未找到Excel文件 {RAW_DATA_DIR}")
+        print(f"错误: 未找到{REPORT_YEAR}年Excel文件 {RAW_DATA_DIR}")
         sys.exit(1)
-    
+
     df = pd.concat([pd.read_excel(f) for f in files], ignore_index=True)
     return df
 
@@ -138,53 +184,57 @@ def batch_0_trend_sla(stats):
 
 
 def batch_1_classification_module(module_data):
-    """第1批：分类+模块分析"""
-    prompt = f"""## 任务：基于完整工单数据进行问题分析
+    """第1批：分类+模块分析（按模块分批调用，避免超时）"""
+    # 按模块拆分数据
+    sections = module_data.split("### ")
+    results = []
+    for i, section in enumerate(sections):
+        section = section.strip()
+        if not section:
+            continue
+        # 提取模块名（第一行）
+        lines = section.split("\n")
+        module_name = lines[0].strip()
+        if not module_name:
+            continue
+        
+        # 判断该分析几个问题
+        import re
+        m = re.search(r'\((\d+)单\)', module_name)
+        count = int(m.group(1)) if m else 10
+        num_problems = 3 if count >= 30 else (2 if count >= 15 else 1)
+        
+        section_data = "\n".join(lines[:100])  # 限制数据量
+        time.sleep(10)  # 模块间等待，避免触发限流
+        
+        prompt = f"""基于以下工单数据，分析主要问题。
 
-### 重要约束
-1. 只基于提供的工单数据进行分析，不要推测
-2. 模块范围基于Excel"模块"字段的实际值
-3. 解决方案必须基于工单中已有的"解决方案"字段，如果为空则写"待完善"
-4. 禁止使用"优化"、"完善"、"加强"等空洞词汇，必须给出具体可执行的建议
+### 数据（{module_name}，共{count}单）
+{section_data}
 
-### 数据格式（完整工单信息）
-- 工单号、分类、模块、标题、描述、**解决方案**、根本原因
-
-### 关键要求
-- 如果工单有解决方案 → 提取并作为主要方案
-- 如果工单解决方案为空 → 写"待完善"，不要自行编造
-- 解决方案要具体，如：进入【XX模块】→点击【XX按钮】→执行XX操作
-- **参考工单必须与问题描述直接相关，禁止幻觉，只列出数据中真实存在的工单号**
-
-### 需要分析的模块（全部列出）
-- 订单/物流: 56单 → 建议3个问题
-- 寻源（询价/招标）: 19单 → 建议1个问题
-- 系统基础/报表/应用商店: 18单 → 建议1个问题
-- 合作伙伴: 17单 → 建议1个问题
-
-### 数据
-{module_data}
+### 要求
+1. 只基于工单数据，不要推测
+2. 解决方案有则提取，无则写"待完善"
+3. 参考工单必须是真实存在的工单号
 
 ### 输出格式
-## 第二部分：分类维度深度分析
-### 2.1 业务咨询 - 97单，建议3个问题
-#### 问题1：{{类别}}
-**问题描述** [基于描述字段提炼共性]
-**原因分析** 1. 2.
-**解决方案**
-1. [基于现有解决方案，如果为空写"待完善"]
-2. [如果有多个工单有解决方案，提取共性]
-**参考工单** - I-xxx
+## {module_name}
+建议{num_problems}个问题，格式：
+### 问题[N]
+**问题描述**：...
+**原因分析**：1. ...
+**解决方案**：1. ...（具体可执行）
+**参考工单**：I-xxx"""
 
-### 2.2 外围系统 - 10单，建议1个问题
-
-## 第三部分：模块维度深度分析
-### 3.1 订单/物流 - 56单，建议3个问题
-### 3.2 寻源（询价/招标） - 19单，建议1个问题
-### 3.3 系统基础/报表/应用商店 - 18单，建议1个问题
-### 3.4 合作伙伴 - 17单，建议1个问题"""
-
-    return call_llm(prompt)
+        try:
+            result = call_llm(prompt, max_tokens=2000)
+            results.append(result)
+            print(f"  [{i+1}/{len(sections)-1}] {module_name} OK")
+        except Exception as e:
+            print(f"  [{i+1}/{len(sections)-1}] {module_name} 失败: {e}")
+            results.append(f"## {module_name}\n（数据不足，无法分析）")
+    
+    return "\n\n".join(results)
 
 
 def batch_2_faq(module_data):
@@ -222,7 +272,7 @@ def batch_2_faq(module_data):
 3. [或联系管理员：如果需要系统配置，写"请联系系统管理员处理"]
 **参考工单** - I-xxxxx"""
 
-    return call_llm(prompt)
+    return call_llm(prompt, max_tokens=2000)
 
 
 def batch_3_summary(batch1_result, batch2_result, stats):
@@ -251,9 +301,9 @@ def batch_3_summary(batch1_result, batch2_result, stats):
 def generate_report():
     """生成完整报告"""
     print("=" * 50)
-    print("SRM Report Generator")
+    print(f"SRM Report Generator - {CLIENT_NAME}")
     print("=" * 50)
-    
+
     # 1. 加载数据
     print("\n[1/5] Loading data...")
     module_data = load_module_data()
@@ -261,35 +311,35 @@ def generate_report():
     stats = get_statistics(df)
     print(f"  Total tickets: {stats['total']}")
     print(f"  SLA rate: {stats['sla']}")
-    
+
     # 2. 第0批：趋势+SLA
     print("\n[2/5] Batch 0: Trend+SLA...")
     result_0 = batch_0_trend_sla(stats)
     print("  [OK]")
-    
+
     # 3. 第1批：分类+模块
     print("\n[3/5] Batch 1: Classification+Module...")
     result_1 = batch_1_classification_module(module_data)
     print("  [OK]")
-    
+
     # 4. 第2批：FAQ
     print("\n[4/5] Batch 2: FAQ...")
     result_2 = batch_2_faq(module_data)
     print("  [OK]")
-    
+
     # 5. 第3批：总结
     print("\n[5/5] Batch 3: Summary...")
     result_3 = batch_3_summary(result_1, result_2, stats)
     print("  [OK]")
-    
+
     # 整合报告
-    report = f"""# 明阳电路2025年度SRM运维分析报告
+    report = f"""# {CLIENT_NAME}{REPORT_YEAR}年度SRM运维分析报告
 
 ## 报告信息
 | 项目 | 内容 |
 |------|------|
-| 报告周期 | 2025年度 |
-| 客户名称 | 明阳电路 |
+| 报告周期 | {REPORT_YEAR}年度 |
+| 客户名称 | {CLIENT_NAME} |
 | 报告生成时间 | {datetime.now().strftime('%Y-%m-%d')} |
 | 服务团队 | 甄云科技 |
 
@@ -340,16 +390,132 @@ def generate_report():
 
 **报告结束**
 """
-    
-    # 保存报告
+
+    # 保存报告（自动跳过已存在文件）
     version = 1
-    output_file = os.path.join(OUTPUT_DIR, f"明阳电路_2025_运维报告_V{version}.md")
+    output_file = os.path.join(OUTPUT_DIR, f"{CLIENT_NAME}_{REPORT_YEAR}_运维报告_V{version}.md")
+    while os.path.exists(output_file):
+        version += 1
+        output_file = os.path.join(OUTPUT_DIR, f"{CLIENT_NAME}_{REPORT_YEAR}_运维报告_V{version}.md")
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(report)
-    
+
     print(f"\n[OK] Report saved: {output_file}")
     return output_file
 
 
+def convert_to_docx_and_send(md_file, client_name, year):
+    """将MD转为DOCX并通过Feishu发送"""
+    import subprocess, re
+    from docx import Document
+
+    docx_file = md_file.replace('.md', '.docx')
+
+    # ---- MD → DOCX ----
+    def add_table_from_markdown(doc, md_content):
+        lines = md_content.strip().split('\n')
+        table = None
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if re.match(r'\|[\s\-:|]+\|', line):
+                continue
+            if line.startswith('|') and line.endswith('|'):
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                if table is None:
+                    table = doc.add_table(rows=1, cols=len(cells))
+                    table.style = 'Table Grid'
+                    for i, cell in enumerate(cells):
+                        table.rows[0].cells[i].text = cell
+                else:
+                    row = table.add_row()
+                    for i, cell in enumerate(cells):
+                        if i < len(row.cells):
+                            row.cells[i].text = cell
+        return table is not None
+
+    def parse_and_convert(md_content, doc):
+        lines = md_content.split('\n')
+        i = 0
+        table_buffer = []
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line:
+                i += 1; continue
+            if line.startswith('|'):
+                table_buffer.append(line)
+                if i + 1 >= len(lines) or not lines[i+1].strip().startswith('|'):
+                    add_table_from_markdown(doc, '\n'.join(table_buffer))
+                    table_buffer = []
+                i += 1; continue
+            if line.startswith('# '):
+                doc.add_heading(line[2:], 0)
+            elif line.startswith('## '):
+                doc.add_heading(line[3:], 1)
+            elif line.startswith('### '):
+                doc.add_heading(line[4:], 2)
+            elif line.startswith('#### '):
+                doc.add_heading(line[5:], 3)
+            elif line.startswith('- ') or line.startswith('* '):
+                text = line[2:]
+                p = doc.add_paragraph()
+                while '**' in text:
+                    start = text.find('**'); end = text.find('**', start+2)
+                    if end == -1: break
+                    before = text[:start]; bold_text = text[start+2:end]; text = text[end+2:]
+                    if before: p.add_run(before)
+                    p.add_run(bold_text).bold = True
+                if text: p.add_run(text)
+            else:
+                text = line
+                p = doc.add_paragraph()
+                while '**' in text:
+                    start = text.find('**'); end = text.find('**', start+2)
+                    if end == -1: break
+                    before = text[:start]; bold_text = text[start+2:end]; text = text[end+2:]
+                    if before: p.add_run(before)
+                    p.add_run(bold_text).bold = True
+                if text: p.add_run(text)
+            i += 1
+
+    print("  [3/3] MD → DOCX...")
+    with open(md_file, 'r', encoding='utf-8') as f:
+        md_content = f.read()
+    doc = Document()
+    doc.styles['Normal'].font.name = '微软雅黑'
+    doc.styles['Normal'].font.size = 12
+    parse_and_convert(md_content, doc)
+    doc.save(docx_file)
+    print(f"  [OK] DOCX saved: {docx_file}")
+
+    # ---- 发送Feishu（先复制到白名单目录）----
+    print("  [4/4] 发送Feishu...")
+    feishu_target = "user:ou_de8266fa9b6ec7b8a25b58df4dab4e7f"
+    # 飞书机器人只能发送白名单目录下的文件，先复制到 workspace/media
+    media_basename = os.path.basename(docx_file)
+    media_path = os.path.join(WORKSPACE_MEDIA_DIR, media_basename)
+    import shutil
+    shutil.copy2(docx_file, media_path)
+    cmd = [
+        "openclaw", "message", "send",
+        "--channel", "feishu",
+        "--target", feishu_target,
+        "--media", media_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        print("  [OK] 已发送至Feishu")
+    else:
+        print(f"  [ERROR] Feishu发送失败: {result.stderr.strip()}")
+
+
 if __name__ == "__main__":
-    generate_report()
+    parser = argparse.ArgumentParser(description="SRM运维报告生成")
+    parser.add_argument("client_name", help="客户名称")
+    parser.add_argument("--year", type=int, default=None, help="年份（不指定则默认上一自然年）")
+    args = parser.parse_args()
+    year = args.year if args.year else datetime.now().year - 1
+    build_paths(args.client_name, year)
+    md_file = generate_report()
+    convert_to_docx_and_send(md_file, args.client_name, year)

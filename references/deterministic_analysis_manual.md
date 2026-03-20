@@ -150,8 +150,8 @@
 
 | 配置 | 当前值 |
 |------|--------|
-| 客户数据目录 | C:\Users\mingh\client-data |
-| 原始数据路径 | C:\Users\mingh\client-data\raw\客户档案\诺斯贝尔\运维工单 |
+| 客户数据目录 | /Users/limingheng/AI\client-data |
+| 原始数据路径 | /Users/limingheng/AI\client-data\raw\客户档案\诺斯贝尔\运维工单 |
 | API密钥 | sk-340ed7819c2346508c0a46a80df85999 |
 | 模型 | deepseek-chat |
 | 温度 | 0.3 |

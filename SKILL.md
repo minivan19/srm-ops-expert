@@ -35,11 +35,11 @@ md2docx.py（可选，转Word）
 
 ```python
 # extract_module_data.py
-EXCEL_DIR = r"C:\Users\mingh\client-data\raw\客户档案\{客户名}\运维工单"
-OUTPUT_DIR = r"C:\Users\mingh\client-data"
+EXCEL_DIR = r"/Users/limingheng/AI\client-data\raw\客户档案\{客户名}\运维工单"
+OUTPUT_DIR = r"/Users/limingheng/AI\client-data"
 
 # generate_report_v2.py
-RAW_DATA_DIR = r"C:\Users\mingh\client-data\raw\客户档案\{客户名}\运维工单"
+RAW_DATA_DIR = r"/Users/limingheng/AI\client-data\raw\客户档案\{客户名}\运维工单"
 MODULE_DATA_FILE = os.path.join(CLIENT_DATA_DIR, "{客户名}_2025_模块工单数据.txt")
 API_KEY = "your-api-key"  # 或设置环境变量 DEEPSEEK_API_KEY
 ```
@@ -48,38 +48,47 @@ API_KEY = "your-api-key"  # 或设置环境变量 DEEPSEEK_API_KEY
 
 ```bash
 cd skills/srm-ops-expert/scripts
-python extract_module_data.py
+python extract_module_data.py 客户名
+python extract_module_data.py 客户名 --year 2024  # 指定年份
 ```
 
-输出：`{客户名}_2025_模块工单数据.txt`
+> **年份规则**：不指定则默认上一自然年（当前2026年，默认2025年）
+
+输出：`/Users/limingheng/AI/client-data/{客户名}/{客户名}_{年份}_模块工单数据.txt`
 
 ### Step 3: 生成报告
 
 ```bash
-python generate_report_v2.py
+python generate_report_v2.py 客户名
+python generate_report_v2.py 客户名 --year 2024  # 指定年份
 ```
 
-输出：`{客户名}_2025_运维报告_V{版本}.md`
+输出：`/Users/limingheng/AI/client-data/{客户名}/{客户名}_{年份}_运维报告_V{版本}.md`
 
 版本号自动递增（V1, V2, ...）
 
 ### Step 4: 转换为Word（可选）
 
 ```bash
-python md2docx.py --file {客户名}_2025_运维报告_V28.md
+python md2docx.py 客户名
+python md2docx.py 客户名 --year 2025  # 指定年份
 ```
+
+输出：`/Users/limingheng/AI/client-data/{客户名}/{客户名}_{年份}_运维报告_V{版本}.docx`
 
 ## 数据目录结构
 
 ```
-C:\Users\mingh\client-data\
-├── raw\
-│   └── 客户档案\
-│       └── {客户名}\           # ⚠️ 需要修改脚本配置
-│           └── 运维工单\
+/Users/limingheng/AI/client-data/
+├── raw/
+│   └── 客户档案/
+│       └── {客户名}/
+│           └── 运维工单/
 │               └── *.xlsx     # 原始工单文件
-├── {客户名}_2025_模块工单数据.txt   # Step 2 生成
-└── {客户名}_2025_运维报告_Vxx.md   # Step 3 生成
+└── {客户名}/                   # Step 2/3/4 生成
+    ├── {客户名}_{年份}_模块工单数据.txt
+    ├── {客户名}_{年份}_运维报告_Vxx.md
+    └── {客户名}_{年份}_运维报告_Vxx.docx
 ```
 
 ## 报告结构
@@ -122,7 +131,7 @@ pip install pandas numpy openpyxl requests python-docx xlrd
 
 ## 注意事项
 
-- 脚本路径硬编码，**使用前需修改脚本开头的配置**
+- **无需修改脚本配置**，通过命令行参数指定客户名即可
 - extract_module_data.py 读取所有 .xlsx 文件并合并
 - generate_report_v2.py 需要先运行 extract_module_data.py
 - API密钥支持环境变量 `DEEPSEEK_API_KEY`
