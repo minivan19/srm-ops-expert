@@ -2,16 +2,24 @@
 # -*- coding: utf-8 -*-
 """虎牙2025运维报告 - 精简版（直接统计+按需LLM）"""
 import os, sys, glob, re, json
+import argparse
 import pandas as pd
 import requests
 import time
 from datetime import datetime
 
 # ============== 配置 ==============
-CLIENT_NAME = "虎牙"
-RAW_DATA_DIR = r"/Users/limingheng/AI\client-data\raw\客户档案\虎牙\运维工单"
-OUTPUT_FILE = rf"/Users/limingheng/AI\client-data\{CLIENT_NAME}_2025_运维报告.md"
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-340ed7819c2346508c0a46a80df85999")
+parser = argparse.ArgumentParser()
+parser.add_argument('--client', '-c', default='虎牙', help='客户名称')
+parser.add_argument('--year', '-y', type=int, default=2025, help='报告年份')
+parser.add_argument('--api-key', help='DeepSeek API Key（默认从环境变量读取）')
+args = parser.parse_args()
+
+CLIENT_NAME = args.client
+YEAR = args.year
+RAW_DATA_DIR = f"/Users/limingheng/AI/client-data/raw/客户档案/{CLIENT_NAME}/运维工单"
+OUTPUT_FILE = f"/Users/limingheng/AI/client-data/{CLIENT_NAME}/{CLIENT_NAME}_{YEAR}_运维报告.md"
+API_KEY = args.api_key or os.environ.get("DEEPSEEK_API_KEY", "")
 MODEL = "deepseek-chat"
 
 # ============== DeepSeek LLM ==============

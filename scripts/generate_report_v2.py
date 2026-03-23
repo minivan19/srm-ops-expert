@@ -295,7 +295,7 @@ def batch_3_summary(batch1_result, batch2_result, stats):
 ### 5.2 主要问题与风险
 ### 5.3 改进建议"""
 
-    return call_llm(prompt)
+    return call_llm(prompt, max_tokens=2000)
 
 
 def generate_report():
