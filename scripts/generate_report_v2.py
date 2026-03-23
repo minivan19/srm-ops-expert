@@ -183,58 +183,49 @@ def batch_0_trend_sla(stats):
     return call_llm(prompt)
 
 
-def batch_1_classification_module(module_data):
-    """第1批：分类+模块分析（按模块分批调用，避免超时）"""
-    # 按模块拆分数据
-    sections = module_data.split("### ")
-    results = []
-    for i, section in enumerate(sections):
-        section = section.strip()
-        if not section:
-            continue
-        # 提取模块名（第一行）
-        lines = section.split("\n")
-        module_name = lines[0].strip()
-        if not module_name:
-            continue
-        
-        # 判断该分析几个问题
-        import re
-        m = re.search(r'\((\d+)单\)', module_name)
-        count = int(m.group(1)) if m else 10
-        num_problems = 3 if count >= 30 else (2 if count >= 15 else 1)
-        
-        section_data = "\n".join(lines[:100])  # 限制数据量
-        time.sleep(10)  # 模块间等待，避免触发限流
-        
-        prompt = f"""基于以下工单数据，分析主要问题。
+def batch_1_classification_module(module_data, stats):
+    """第1批：分类维度+模块维度分析（一次性LLM调用）"""
+    prompt = f"""## 任务：基于工单数据进行分析
 
-### 数据（{module_name}，共{count}单）
-{section_data}
-
-### 要求
-1. 只基于工单数据，不要推测
+### 重要约束
+1. 只基于提供的工单数据，不要推测
 2. 解决方案有则提取，无则写"待完善"
-3. 参考工单必须是真实存在的工单号
+3. 参考工单必须真实存在
+4. 禁止空洞词汇
+
+### 数据
+{module_data}
+
+### 已知统计（参考）
+- 总工单：{stats['total']}
+- SLA达标率：{stats['sla']}
+
+### 已知模块分布
+{stats['module']}
+
+### 已知分类分布
+{stats['category']}
 
 ### 输出格式
-## {module_name}
-建议{num_problems}个问题，格式：
-### 问题[N]
-**问题描述**：...
-**原因分析**：1. ...
-**解决方案**：1. ...（具体可执行）
-**参考工单**：I-xxx"""
+## 第二部分：分类维度深度分析
+### 2.1 [分类名称 - X单，建议N个问题]
+[问题内容]
+### 2.2 [分类名称 - X单，建议N个问题]
+[问题内容]
 
-        try:
-            result = call_llm(prompt, max_tokens=2000)
-            results.append(result)
-            print(f"  [{i+1}/{len(sections)-1}] {module_name} OK")
-        except Exception as e:
-            print(f"  [{i+1}/{len(sections)-1}] {module_name} 失败: {e}")
-            results.append(f"## {module_name}\n（数据不足，无法分析）")
-    
-    return "\n\n".join(results)
+## 第三部分：模块维度深度分析
+### 3.1 [模块名称 - X单，建议N个问题]
+[问题内容]
+### 3.2 [模块名称 - X单，建议N个问题]
+[问题内容]
+
+注意：
+- 必须同时输出"## 第二部分"和"## 第三部分"两个完整章节
+- 子标题用###（如### 2.1、### 3.1）
+- 问题格式：**问题描述** + **原因分析** + **解决方案** + **参考工单**
+- 工单数少于5单的分类/模块可跳过"""
+
+    return call_llm(prompt)
 
 
 def batch_2_faq(module_data):
@@ -319,7 +310,7 @@ def generate_report():
 
     # 3. 第1批：分类+模块
     print("\n[3/5] Batch 1: Classification+Module...")
-    result_1 = batch_1_classification_module(module_data)
+    result_1 = batch_1_classification_module(module_data, stats)
     print("  [OK]")
 
     # 4. 第2批：FAQ
@@ -372,19 +363,17 @@ def generate_report():
 
 ---
 
-## 第二部分：分类维度分析
-
 {result_1}
 
 ---
 
-## 第三部分：高频Q&A知识库
+## 第四部分：高频Q&A知识库
 
 {result_2}
 
 ---
 
-## 第四部分：总结与改进建议
+## 第五部分：总结与改进建议
 
 {result_3}
 
