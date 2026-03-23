@@ -97,6 +97,26 @@ def main():
         print(f"错误：找不到运维工单目录: {excel_dir}")
         sys.exit(1)
 
+    # 确认步骤
+    files = sorted(glob.glob(os.path.join(excel_dir, "*.xlsx")))
+    year_files = [f for f in files if str(year) in os.path.basename(f)]
+    current_year = datetime.now().year
+    default_note = f"（默认：当前{current_year}年，取上一自然年{year}）" if args.year is None else f"（指定）"
+
+    print(f"\n{'='*50}")
+    print(f"  数据提取确认")
+    print(f"{'='*50}")
+    print(f"  客户：{client_name}")
+    print(f"  年份：{year}年 {default_note}")
+    print(f"  找到：{len(year_files)}个工单文件")
+    for f in year_files:
+        print(f"    - {os.path.basename(f)}")
+    print(f"{'='*50}")
+    confirm = input(f"\n  确认继续提取？[Y/n]: ").strip().lower()
+    if confirm == 'n':
+        print("  已取消")
+        sys.exit(0)
+
     df = load_data(excel_dir, year)
     if df.empty:
         print(f"错误：未找到{year}年工单数据")

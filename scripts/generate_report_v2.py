@@ -510,6 +510,36 @@ def convert_to_docx_and_send(md_file, client_name, year):
         print(f"  [ERROR] Feishu发送失败: {result.stderr.strip()}")
 
 
+def confirm_before_generation(client_name, year):
+    """执行前确认，显示生成条件摘要"""
+    import glob
+    raw_dir = os.path.join(RAW_DATA_ROOT, client_name, "运维工单")
+    files = sorted(glob.glob(os.path.join(raw_dir, "*.xlsx")))
+    year_files = [f for f in files if str(year) in os.path.basename(f)]
+    file_count = len(year_files)
+
+    current_year = datetime.now().year
+    default_note = f"（默认：当前{current_year}年，取上一自然年{year}）" if args.year is None else f"（指定）"
+
+    print(f"\n{'='*50}")
+    print(f"  报告生成确认")
+    print(f"{'='*50}")
+    print(f"  客户：{client_name}")
+    print(f"  年份：{year}年 {default_note}")
+    print(f"  依据：{raw_dir}")
+    print(f"  找到：{file_count}个工单文件")
+    if year_files:
+        for f in year_files:
+            print(f"    - {os.path.basename(f)}")
+    print(f"{'='*50}")
+
+    confirm = input(f"\n  确认继续生成？[Y/n]: ").strip().lower()
+    if confirm == 'n':
+        print("  已取消")
+        sys.exit(0)
+    print()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SRM运维报告生成")
     parser.add_argument("client_name", help="客户名称")
@@ -517,5 +547,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     year = args.year if args.year else datetime.now().year - 1
     build_paths(args.client_name, year)
+    confirm_before_generation(args.client_name, year)
     md_file = generate_report()
     convert_to_docx_and_send(md_file, args.client_name, year)
