@@ -184,12 +184,12 @@ def batch_0_trend_sla(stats):
 
 
 def batch_1_classification_module(module_data, stats):
-    """第1批：分类维度分析（单次LLM调用）"""
+    """第1批：分类维度分析（循环调用，每个分类单独处理）"""
     import re
-    # 提分类分布，只保留 >=10 单的分类
+
+    # 第1部分：从 stats 提取 >=10 单的分类
     cat_lines = [l for l in stats['category'].strip().split('\n') if '|' in l and '分类' not in l]
-    # 解析出每个分类的名称和工单数，保留 >=10 单的
-    valid_cats = []
+    valid_cats = []  # [(分类名, 工单数)]
     for line in cat_lines:
         parts = line.strip('| ').split('|')
         if len(parts) >= 2:
@@ -197,44 +197,73 @@ def batch_1_classification_module(module_data, stats):
                 cnt = int(parts[-1].strip())
                 name = '|'.join(parts[:-1]).strip()
                 if cnt >= 10:
-                    valid_cats.append(f"| {name} | {cnt} |")
+                    valid_cats.append((name, cnt))
             except ValueError:
                 pass
-    cat_summary = '\n'.join(valid_cats)
 
-    # 解析 module_data，按模块分组过滤，只保留 >=10 单的模块
-    THRESHOLD = 10
+    # 第2部分：从 module_data 按分类聚合工单
+    # module_data 格式：### 模块名 (N单)\n**工单号**: ...\n**分类**: xxx\n...
+    tickets_by_cat = {}  # {分类名: [ticket_block]}
     sections = module_data.split("### ")
-    filtered_sections = []
     for sec in sections:
         sec = sec.strip()
         if not sec:
             continue
         lines = sec.split('\n')
-        module_name = lines[0].strip()
-        m = re.search(r'\((\d+)单\)', module_name)
-        count = int(m.group(1)) if m else 0
-        if count >= THRESHOLD:
-            filtered_sections.append("### " + sec)
-    filtered_module_data = '\n\n'.join(filtered_sections)
+        # 解析该模块下的工单（每个工单以 **工单号** 开头）
+        current_ticket = []
+        for line in lines:
+            if line.startswith('**工单号**'):
+                # 保存上一个工单
+                if current_ticket:
+                    ticket_text = '\n'.join(current_ticket)
+                    # 提取分类
+                    cat_m = re.search(r'\*\*分类\*\*:\s*(.+)', ticket_text)
+                    if cat_m:
+                        cat_name = cat_m.group(1).strip()
+                        if cat_name not in tickets_by_cat:
+                            tickets_by_cat[cat_name] = []
+                        tickets_by_cat[cat_name].append(ticket_text)
+                    current_ticket = [line]
+                else:
+                    current_ticket = [line]
+            else:
+                if current_ticket:
+                    current_ticket.append(line)
+        # 处理最后一张工单
+        if current_ticket:
+            ticket_text = '\n'.join(current_ticket)
+            cat_m = re.search(r'\*\*分类\*\*:\s*(.+)', ticket_text)
+            if cat_m:
+                cat_name = cat_m.group(1).strip()
+                if cat_name not in tickets_by_cat:
+                    tickets_by_cat[cat_name] = []
+                tickets_by_cat[cat_name].append(ticket_text)
 
-    prompt = f"""## 任务：基于工单分类字段进行问题分析
+    # 第3部分：循环调用 LLM，每个分类单独处理
+    results = []
+    for idx, (cat_name, count) in enumerate(valid_cats, 1):
+        tickets = tickets_by_cat.get(cat_name, [])
+        if not tickets:
+            results.append(f"### 2.{idx}. {cat_name} - {count}单\n（无工单数据）")
+            continue
+        section_data = '\n\n---\n\n'.join(tickets[:50])  # 最多50条
+        num_problems = 3 if count >= 30 else (2 if count >= 15 else 1)
+        time.sleep(10)
+
+        prompt = f"""## 任务：基于以下工单数据，按分类分析主要问题
+
+### 数据（{cat_name}，共{count}单）
+{section_data}
 
 ### 重要约束
-1. 只基于提供的工单数据，不要推测
+1. 只基于工单数据，不要推测
 2. 解决方案有则提取，无则写"待完善"
 3. 参考工单必须真实存在
 4. 禁止空洞词汇
-5. 只分析工单数 >=10 的分类
-
-### 已知分类分布（已过滤，只保留 >=10 单）
-{cat_summary}
-
-### 数据（已过滤，只保留 >=10 单的模块）
-{filtered_module_data}
 
 ### 输出格式
-### 2.1 [分类名称 - X单，建议N个问题]
+### 2.{idx}. {cat_name} - {count}单，建议{num_problems}个问题
 #### 问题1：[问题主题]
 **问题描述**：...
 **原因分析**：1. ...
@@ -242,19 +271,22 @@ def batch_1_classification_module(module_data, stats):
 **参考工单**：I-xxx
 
 #### 问题2：[问题主题]
-**问题描述**：...
-...
-
-### 2.2 [分类名称 - X单，建议N个问题]
-[同上格式]
+（如需生成{num_problems}个问题则继续）
 
 注意：每个问题前必须加`#### 问题[N]`子标题以示区分"""
 
-    result_cat = call_llm(prompt, max_tokens=4000)
+        try:
+            result = call_llm(prompt, max_tokens=3000)
+            results.append(result)
+            print(f"  [{idx}/{len(valid_cats)}] {cat_name} ({count}单) OK")
+        except Exception as e:
+            print(f"  [{idx}/{len(valid_cats)}] {cat_name} ({count}单) 失败: {e}")
+            results.append(f"### 2.{idx}. {cat_name} - {count}单\n（分析失败）")
+
+    result_cat = '\n\n'.join(results)
 
     # 第2部分：模块维度分析（循环调用，只处理 >=10 单的模块）
     sections = module_data.split("### ")
-    # 先过滤出 >=10 单的模块
     valid_sections = []
     for sec in sections:
         sec = sec.strip()
