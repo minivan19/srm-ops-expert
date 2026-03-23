@@ -225,7 +225,7 @@ def batch_1_classification_module(module_data, stats):
 - 问题格式：**问题描述** + **原因分析** + **解决方案** + **参考工单**
 - 工单数少于5单的分类/模块可跳过"""
 
-    return call_llm(prompt)
+    return call_llm(prompt, max_tokens=6000)
 
 
 def batch_2_faq(module_data):
