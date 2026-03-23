@@ -186,9 +186,37 @@ def batch_0_trend_sla(stats):
 def batch_1_classification_module(module_data, stats):
     """第1批：分类维度分析（单次LLM调用）"""
     import re
-    # 提分类分布
+    # 提分类分布，只保留 >=10 单的分类
     cat_lines = [l for l in stats['category'].strip().split('\n') if '|' in l and '分类' not in l]
-    cat_summary = '\n'.join(cat_lines[:8])
+    # 解析出每个分类的名称和工单数，保留 >=10 单的
+    valid_cats = []
+    for line in cat_lines:
+        parts = line.strip('| ').split('|')
+        if len(parts) >= 2:
+            try:
+                cnt = int(parts[-1].strip())
+                name = '|'.join(parts[:-1]).strip()
+                if cnt >= 10:
+                    valid_cats.append(f"| {name} | {cnt} |")
+            except ValueError:
+                pass
+    cat_summary = '\n'.join(valid_cats)
+
+    # 解析 module_data，按模块分组过滤，只保留 >=10 单的模块
+    THRESHOLD = 10
+    sections = module_data.split("### ")
+    filtered_sections = []
+    for sec in sections:
+        sec = sec.strip()
+        if not sec:
+            continue
+        lines = sec.split('\n')
+        module_name = lines[0].strip()
+        m = re.search(r'\((\d+)单\)', module_name)
+        count = int(m.group(1)) if m else 0
+        if count >= THRESHOLD:
+            filtered_sections.append("### " + sec)
+    filtered_module_data = '\n\n'.join(filtered_sections)
 
     prompt = f"""## 任务：基于工单分类字段进行问题分析
 
@@ -197,12 +225,13 @@ def batch_1_classification_module(module_data, stats):
 2. 解决方案有则提取，无则写"待完善"
 3. 参考工单必须真实存在
 4. 禁止空洞词汇
+5. 只分析工单数 >=10 的分类
 
-### 已知分类分布
+### 已知分类分布（已过滤，只保留 >=10 单）
 {cat_summary}
 
-### 数据
-{module_data}
+### 数据（已过滤，只保留 >=10 单的模块）
+{filtered_module_data}
 
 ### 输出格式
 ### 2.1 [分类名称 - X单，建议N个问题]
@@ -223,21 +252,25 @@ def batch_1_classification_module(module_data, stats):
 
     result_cat = call_llm(prompt, max_tokens=4000)
 
-    # 第2部分：模块维度分析（循环调用）
+    # 第2部分：模块维度分析（循环调用，只处理 >=10 单的模块）
     sections = module_data.split("### ")
-    results = []
-    for i, section in enumerate(sections):
-        section = section.strip()
-        if not section:
+    # 先过滤出 >=10 单的模块
+    valid_sections = []
+    for sec in sections:
+        sec = sec.strip()
+        if not sec:
             continue
-        lines = section.split("\n")
+        lines = sec.split("\n")
         module_name = lines[0].strip()
         if not module_name:
             continue
         m = re.search(r'\((\d+)单\)', module_name)
-        count = int(m.group(1)) if m else 10
+        count = int(m.group(1)) if m else 0
+        if count >= 10:
+            valid_sections.append((module_name, count, "\n".join(lines[:100])))
+    results = []
+    for idx, (module_name, count, section_data) in enumerate(valid_sections, 1):
         num_problems = 3 if count >= 30 else (2 if count >= 15 else 1)
-        section_data = "\n".join(lines[:100])
         time.sleep(10)
 
         prompt = f"""## 任务：基于以下工单数据，分析主要问题
@@ -252,7 +285,7 @@ def batch_1_classification_module(module_data, stats):
 4. 禁止空洞词汇
 
 ### 输出格式
-### {module_name}
+### 3.{idx}. {module_name}
 #### 问题1：[问题主题]
 **问题描述**：...
 **原因分析**：1. ...
@@ -267,10 +300,10 @@ def batch_1_classification_module(module_data, stats):
         try:
             result = call_llm(prompt, max_tokens=2500)
             results.append(result)
-            print(f"  [{i+1}/{len(sections)-1}] {module_name} OK")
+            print(f"  [{idx}/{len(valid_sections)}] {module_name} OK")
         except Exception as e:
-            print(f"  [{i+1}/{len(sections)-1}] {module_name} 失败: {e}")
-            results.append(f"### {module_name}\n（数据不足，无法分析）")
+            print(f"  [{idx}/{len(valid_sections)}] {module_name} 失败: {e}")
+            results.append(f"### 3.{idx}. {module_name}\n（数据不足，无法分析）")
 
     result_mod = "\n\n".join(results)
     return result_cat, result_mod
