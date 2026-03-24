@@ -16,7 +16,7 @@ from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data"
+CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data/客户报告"
 
 
 def find_latest_md(client_name, year):

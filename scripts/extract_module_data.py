@@ -14,8 +14,8 @@ import sys
 import argparse
 from datetime import datetime
 
-RAW_DATA_ROOT = "/Users/limingheng/AI/client-data/raw/客户档案"
-CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data"
+RAW_DATA_ROOT = "/Users/limingheng/AI/client-data/客户档案"
+CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data/客户报告"
 
 
 def build_paths(client_name, year):
