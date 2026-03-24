@@ -192,10 +192,11 @@ def batch_1_classification_module(module_data, stats):
     valid_cats = []  # [(分类名, 工单数)]
     for line in cat_lines:
         parts = line.strip('| ').split('|')
-        if len(parts) >= 2:
+        # 格式: | 序号 | 分类名称 | 工单数 | 占比 | → parts = ['序号', '分类名', '工单数', '占比']
+        if len(parts) >= 3:
             try:
-                cnt = int(parts[-1].strip())
-                name = '|'.join(parts[:-1]).strip()
+                cnt = int(parts[2].strip())
+                name = parts[1].strip()
                 if cnt >= 10:
                     valid_cats.append((name, cnt))
             except ValueError:
