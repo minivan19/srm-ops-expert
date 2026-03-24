@@ -504,20 +504,10 @@ def generate_report():
 **报告结束**
 """
 
-    # 报告完整性校验：必须包含五大部分的关键标记
-    def _is_complete(filepath):
-        markers = ["第一部分", "第二部分", "第三部分", "第四部分", "第五部分"]
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-            return all(m in content for m in markers)
-        except Exception:
-            return False
-
-    # 保存报告（跳过已存在的完整版本）
+    # 保存报告（找到下一个可用版本号）
     version = 1
     output_file = os.path.join(OUTPUT_DIR, f"{CLIENT_NAME}_{REPORT_YEAR}_运维报告_V{version}.md")
-    while os.path.exists(output_file) and not _is_complete(output_file):
+    while os.path.exists(output_file):
         version += 1
         output_file = os.path.join(OUTPUT_DIR, f"{CLIENT_NAME}_{REPORT_YEAR}_运维报告_V{version}.md")
     with open(output_file, 'w', encoding='utf-8') as f:
