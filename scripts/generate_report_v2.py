@@ -21,11 +21,16 @@ RAW_DATA_ROOT = "/Users/limingheng/AI/client-data/客户档案"
 CLIENT_DATA_DIR = "/Users/limingheng/AI/client-data/客户报告"
 WORKSPACE_MEDIA_DIR = "/Users/limingheng/.openclaw/workspace/media"
 
-# API配置
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-340ed7819c2346508c0a46a80df85999")
+# API配置（双模型：豆包主模型 + DeepSeek兜底）
+DOUBAN_API_KEY = os.environ.get("DOUBAN_API_KEY", "")
+DOUBAN_API_URL = "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"
+DOUBAN_MODEL = "doubao-seed-2.0-pro"
+
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 # LLM配置
-MODEL = "deepseek-chat"
 TEMPERATURE = 0.3
 
 # 全局路径（由 build_paths 填充）
@@ -52,43 +57,84 @@ def build_paths(client_name, year):
 
 def call_llm(prompt, temperature=TEMPERATURE, max_retries=5, retry_delay=5.0,
               max_tokens=800):
-    """调用DeepSeek LLM（带重试机制，非streaming模式）"""
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens
-    }
-    last_error = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            # 使用 stream=False，读取完整响应后再解析
-            response = requests.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=(30, 240),
-                stream=False
-            )
-            if response.status_code == 200:
-                result = response.json()
-                if "choices" in result and len(result["choices"]) > 0:
-                    return result["choices"][0]["message"]["content"]
+    """调用LLM（豆包主模型 -> DeepSeek兜底，带重试机制）"""
+
+    # ---- 优先豆包 ----
+    if DOUBAN_API_KEY:
+        headers = {
+            "Authorization": f"Bearer {DOUBAN_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": DOUBAN_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(
+                    DOUBAN_API_URL,
+                    headers=headers,
+                    json=data,
+                    timeout=(30, 240),
+                    stream=False
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if "choices" in result and len(result["choices"]) > 0:
+                        print(f"    [豆包调用成功]")
+                        return result["choices"][0]["message"]["content"]
+                    else:
+                        last_error = f"无效响应格式: {result}"
                 else:
-                    last_error = f"无效响应格式: {result}"
-            else:
-                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
-        except Exception as e:
-            last_error = str(e)
-        if attempt < max_retries:
-            print(f"    [LLM重试 {attempt}/{max_retries}，{retry_delay:.0f}s后...]")
+                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+            except Exception as e:
+                last_error = str(e)
+            print(f"    [豆包重试 {attempt}/{max_retries}，{retry_delay:.0f}s后...]")
             time.sleep(retry_delay)
             retry_delay *= 2
-    raise RuntimeError(f"LLM调用失败（已重试{max_retries}次）: {last_error}")
+
+    # ---- DeepSeek兜底 ----
+    if DEEPSEEK_API_KEY:
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": DEEPSEEK_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(
+                    DEEPSEEK_API_URL,
+                    headers=headers,
+                    json=data,
+                    timeout=(30, 240),
+                    stream=False
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    if "choices" in result and len(result["choices"]) > 0:
+                        print(f"    [DeepSeek兜底调用成功]")
+                        return result["choices"][0]["message"]["content"]
+                    else:
+                        last_error = f"无效响应格式: {result}"
+                else:
+                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+            except Exception as e:
+                last_error = str(e)
+            if attempt < max_retries:
+                print(f"    [DeepSeek重试 {attempt}/{max_retries}，{retry_delay:.0f}s后...]")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+        raise RuntimeError(f"LLM调用失败（豆包+DeepSeek均失败，已重试{max_retries}次）: {last_error}")
+
+    raise RuntimeError("LLM调用失败：未配置任何API Key（DOUBAN_API_KEY 和 DEEPSEEK_API_KEY 均未设置）")
 
 
 def load_module_data():
